@@ -345,6 +345,231 @@ fn wrap_text(text : String, max_chars : Int) -> Array[String] {
 }
 
 ///|
+priv struct RenderLine {
+  is_blank : Bool
+  is_bullet : Bool
+  text : String
+}
+
+///|
+priv struct SlideLayout {
+  title_size : Int
+  body_size : Int
+  line_height : Int
+  lines : Array[RenderLine]
+}
+
+///|
+fn clamp_int(value : Int, min_value : Int, max_value : Int) -> Int {
+  if value < min_value {
+    min_value
+  } else if value > max_value {
+    max_value
+  } else {
+    value
+  }
+}
+
+///|
+fn body_size_candidates(min_size : Int, max_size : Int) -> Array[Int] {
+  let values : Array[Int] = []
+  let mut size = max_size
+  while size >= min_size {
+    values.push(size)
+    size = size - 2
+  }
+  values
+}
+
+///|
+fn compute_wrap_chars(theme : SlideTheme, body_size : Int) -> Int {
+  let wrap_chars = 56 * theme.body_size / body_size
+  if wrap_chars < 16 {
+    16
+  } else {
+    wrap_chars
+  }
+}
+
+///|
+fn compute_title_size(theme : SlideTheme, body_size : Int) -> Int {
+  let scaled = theme.title_size * body_size / theme.body_size
+  clamp_int(scaled, 40, theme.title_size)
+}
+
+///|
+fn compute_line_height(theme : SlideTheme, body_size : Int) -> Int {
+  let scaled = theme.line_height * body_size / theme.body_size
+  let minimum = body_size + 10
+  if scaled < minimum {
+    minimum
+  } else {
+    scaled
+  }
+}
+
+///|
+fn render_lines_from_slide(
+  slide : SlideContent,
+  wrap_chars : Int,
+) -> Array[RenderLine] {
+  let lines : Array[RenderLine] = []
+  for raw_line in slide.lines {
+    let trimmed = trim_to_string(raw_line)
+    if trimmed == "" {
+      lines.push({ is_blank: true, is_bullet: false, text: "" })
+      continue
+    }
+
+    let (is_bullet, body_text) = if trimmed.has_prefix("- "[:]) ||
+      trimmed.has_prefix("* "[:]) {
+      (true, trim_to_string((try! trimmed[2:]).to_string()))
+    } else {
+      (false, trimmed)
+    }
+
+    for wrapped in wrap_text(body_text, wrap_chars) {
+      lines.push({ is_blank: false, is_bullet, text: wrapped })
+    }
+  }
+  lines
+}
+
+///|
+fn can_render_all_lines(
+  lines : Array[RenderLine],
+  body_start_y : Int,
+  line_height : Int,
+  bottom_limit : Int,
+) -> Bool {
+  let mut body_y = body_start_y
+  for line in lines {
+    if line.is_blank {
+      body_y = body_y + line_height / 2
+      continue
+    }
+    if body_y >= bottom_limit {
+      return false
+    }
+    body_y = body_y + line_height
+  }
+  true
+}
+
+///|
+fn append_ellipsis(text : String, max_chars : Int) -> String {
+  if max_chars <= 1 {
+    return "…"
+  }
+  let trimmed = trim_to_string(text)
+  if trimmed == "" {
+    return "…"
+  }
+  if trimmed.length() >= max_chars {
+    let keep = max_chars - 1
+    if keep <= 0 {
+      "…"
+    } else {
+      (try! trimmed[:keep]).to_string() + "…"
+    }
+  } else {
+    trimmed + "…"
+  }
+}
+
+///|
+fn truncate_lines_for_height(
+  lines : Array[RenderLine],
+  body_start_y : Int,
+  line_height : Int,
+  bottom_limit : Int,
+  wrap_chars : Int,
+) -> Array[RenderLine] {
+  let rendered : Array[RenderLine] = []
+  let mut body_y = body_start_y
+  let mut truncated = false
+
+  for line in lines {
+    if line.is_blank {
+      let next_y = body_y + line_height / 2
+      if next_y >= bottom_limit {
+        truncated = true
+        break
+      }
+      rendered.push(line)
+      body_y = next_y
+      continue
+    }
+
+    if body_y >= bottom_limit {
+      truncated = true
+      break
+    }
+
+    rendered.push(line)
+    body_y = body_y + line_height
+  }
+
+  if !truncated {
+    return rendered
+  }
+
+  let mut last_text_idx : Int? = None
+  for i = 0; i < rendered.length(); i = i + 1 {
+    if !rendered[i].is_blank {
+      last_text_idx = Some(i)
+    }
+  }
+
+  match last_text_idx {
+    Some(idx) => {
+      let line = rendered[idx]
+      rendered[idx] = {
+        is_blank: false,
+        is_bullet: line.is_bullet,
+        text: append_ellipsis(line.text, wrap_chars),
+      }
+    }
+    None => rendered.push({ is_blank: false, is_bullet: false, text: "…" })
+  }
+
+  rendered
+}
+
+///|
+fn build_slide_layout(slide : SlideContent, theme : SlideTheme) -> SlideLayout {
+  let min_body_size = 24
+  let max_body_size = 46
+  let bottom_limit = theme.height - 64
+
+  for body_size in body_size_candidates(min_body_size, max_body_size) {
+    let title_size = compute_title_size(theme, body_size)
+    let line_height = compute_line_height(theme, body_size)
+    let wrap_chars = compute_wrap_chars(theme, body_size)
+    let body_start_y = theme.padding_y + title_size + 48
+    let lines = render_lines_from_slide(slide, wrap_chars)
+    if can_render_all_lines(lines, body_start_y, line_height, bottom_limit) {
+      return { title_size, body_size, line_height, lines }
+    }
+  }
+
+  let body_size = min_body_size
+  let title_size = compute_title_size(theme, body_size)
+  let line_height = compute_line_height(theme, body_size)
+  let wrap_chars = compute_wrap_chars(theme, body_size)
+  let body_start_y = theme.padding_y + title_size + 48
+  let lines = render_lines_from_slide(slide, wrap_chars)
+  {
+    title_size,
+    body_size,
+    line_height,
+    lines: truncate_lines_for_height(
+      lines, body_start_y, line_height, bottom_limit, wrap_chars,
+    ),
+  }
+}
+
+///|
 fn render_slide_svg(
   slide : SlideContent,
   index : Int,
@@ -353,8 +578,10 @@ fn render_slide_svg(
 ) -> String {
   let sb = StringBuilder::new()
   let title = if slide.title == "" { "Slide" } else { slide.title }
+  let layout = build_slide_layout(slide, theme)
   let body_x = theme.padding_x
-  let mut body_y = theme.padding_y + theme.title_size + 48
+  let mut body_y = theme.padding_y + layout.title_size + 48
+  let bullet_radius = layout.body_size / 6 + 1
 
   sb.write_string(
     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " +
@@ -404,7 +631,7 @@ fn render_slide_svg(
     "\" y=\"" +
     theme.padding_y.to_string() +
     "\" font-size=\"" +
-    theme.title_size.to_string() +
+    layout.title_size.to_string() +
     "\" font-weight=\"700\" fill=\"" +
     theme.title_color +
     "\">" +
@@ -412,51 +639,40 @@ fn render_slide_svg(
     "</text>",
   )
 
-  for raw_line in slide.lines {
-    let trimmed = trim_to_string(raw_line)
-    if trimmed == "" {
-      body_y = body_y + theme.line_height / 2
+  for line in layout.lines {
+    if line.is_blank {
+      body_y = body_y + layout.line_height / 2
       continue
     }
 
-    let (is_bullet, body_text) = if trimmed.has_prefix("- "[:]) ||
-      trimmed.has_prefix("* "[:]) {
-      (true, trim_to_string((try! trimmed[2:]).to_string()))
-    } else {
-      (false, trimmed)
-    }
-
-    for wrapped in wrap_text(body_text, 56) {
-      if body_y >= theme.height - 64 {
-        break
-      }
-      let x = if is_bullet { body_x + 24 } else { body_x }
-      if is_bullet {
-        sb.write_string(
-          "<circle cx=\"" +
-          (body_x + 8).to_string() +
-          "\" cy=\"" +
-          (body_y - theme.body_size / 3).to_string() +
-          "\" r=\"6\" fill=\"" +
-          theme.accent +
-          "\"/>",
-        )
-      }
+    let x = if line.is_bullet { body_x + 24 } else { body_x }
+    if line.is_bullet {
       sb.write_string(
-        "<text x=\"" +
-        x.to_string() +
-        "\" y=\"" +
-        body_y.to_string() +
-        "\" font-size=\"" +
-        theme.body_size.to_string() +
+        "<circle data-bullet=\"1\" cx=\"" +
+        (body_x + 8).to_string() +
+        "\" cy=\"" +
+        (body_y - layout.body_size / 3).to_string() +
+        "\" r=\"" +
+        bullet_radius.to_string() +
         "\" fill=\"" +
-        theme.body_color +
-        "\">" +
-        escape_xml(wrapped) +
-        "</text>",
+        theme.accent +
+        "\"/>",
       )
-      body_y = body_y + theme.line_height
     }
+    sb.write_string(
+      "<text x=\"" +
+      x.to_string() +
+      "\" y=\"" +
+      body_y.to_string() +
+      "\" font-size=\"" +
+      layout.body_size.to_string() +
+      "\" fill=\"" +
+      theme.body_color +
+      "\">" +
+      escape_xml(line.text) +
+      "</text>",
+    )
+    body_y = body_y + layout.line_height
   }
 
   sb.write_string(
@@ -537,7 +753,7 @@ pub fn render_slide_deck_page(
   sb.write_string(escape_xml(input.title))
   sb.write_string("</title>")
   sb.write_string(
-    "<style>body{margin:0;background:#050816;color:#dbeafe;font-family:ui-sans-serif,system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;}header{padding:14px 20px;border-bottom:1px solid #1f2937;background:#020617;}h1{margin:0;font-size:1rem;font-weight:600;}main{flex:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;padding:16px;max-width:1440px;width:100%;margin:0 auto;align-items:center;}button{width:52px;height:52px;border-radius:999px;border:1px solid #1e3a5f;background:#0f172a;color:#bae6fd;cursor:pointer;}button:disabled{opacity:0.35;cursor:not-allowed;}article{display:none;}article.active{display:block;}article svg{width:100%;display:block;border-radius:16px;box-shadow:0 22px 52px rgba(0,0,0,.45);}footer{padding:10px 16px 18px;color:#93c5fd;text-align:center;}@media(max-width:840px){main{grid-template-columns:1fr;}button{justify-self:center;}}</style>",
+    "<style>body{margin:0;background:#050816;color:#dbeafe;font-family:ui-sans-serif,system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;}header{padding:14px 20px;border-bottom:1px solid #1f2937;background:#020617;}h1{margin:0;font-size:1rem;font-weight:600;}main{flex:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;padding:16px;max-width:1440px;width:100%;margin:0 auto;align-items:center;}button.nav{width:52px;height:52px;border-radius:999px;border:1px solid #1e3a5f;background:#0f172a;color:#bae6fd;cursor:pointer;}button.nav:disabled{opacity:0.35;cursor:not-allowed;}article{display:none;}article.active{display:block;}article svg{width:100%;display:block;border-radius:16px;box-shadow:0 22px 52px rgba(0,0,0,.45);}footer{padding:10px 16px 18px;color:#93c5fd;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;}#font-controls{display:inline-flex;align-items:center;gap:6px;}button.font-btn{border:1px solid #1e3a5f;background:#0f172a;color:#bae6fd;border-radius:8px;height:34px;min-width:36px;padding:0 8px;cursor:pointer;font-size:.78rem;}button.font-btn:disabled{opacity:0.4;cursor:not-allowed;}#font-scale{min-width:48px;text-align:center;color:#cfe7ff;font-size:.82rem;}@media(max-width:840px){main{grid-template-columns:1fr;}button.nav{justify-self:center;width:46px;height:46px;}footer{gap:8px;}}</style>",
   )
   sb.write_string("</head><body>")
   sb.write_string("<header><h1>")
@@ -546,7 +762,7 @@ pub fn render_slide_deck_page(
   sb.write_string(escape_xml(theme.name))
   sb.write_string("</h1></header>")
   sb.write_string(
-    "<main><button type=\"button\" id=\"prev\">◀</button><section id=\"viewport\">",
+    "<main><button class=\"nav\" type=\"button\" id=\"prev\">◀</button><section id=\"viewport\">",
   )
   for i = 0; i < svgs.length(); i = i + 1 {
     let active = if i == start_index { " active" } else { "" }
@@ -561,15 +777,15 @@ pub fn render_slide_deck_page(
     )
   }
   sb.write_string(
-    "</section><button type=\"button\" id=\"next\">▶</button></main>",
+    "</section><button class=\"nav\" type=\"button\" id=\"next\">▶</button></main>",
   )
   sb.write_string(
-    "<footer><span id=\"counter\"></span> · ← → / #3</footer>",
+    "<footer><span id=\"counter\"></span><span>← → / #3</span><div id=\"font-controls\"><button class=\"font-btn\" type=\"button\" id=\"text-dec\">A-</button><span id=\"font-scale\">100%</span><button class=\"font-btn\" type=\"button\" id=\"text-inc\">A+</button><button class=\"font-btn\" type=\"button\" id=\"text-reset\">Reset</button></div></footer>",
   )
   sb.write_string(
-    "<script>(function(){const slides=Array.from(document.querySelectorAll('.slide'));const prev=document.getElementById('prev');const next=document.getElementById('next');const counter=document.getElementById('counter');const total=slides.length;let idx=" +
+    "<script>(function(){const slides=Array.from(document.querySelectorAll('.slide'));const prev=document.getElementById('prev');const next=document.getElementById('next');const counter=document.getElementById('counter');const dec=document.getElementById('text-dec');const inc=document.getElementById('text-inc');const reset=document.getElementById('text-reset');const scaleLabel=document.getElementById('font-scale');const total=slides.length;const minScale=80;const maxScale=140;const stepScale=10;let textScale=100;let idx=" +
     start_index.to_string() +
-    ";const clamp=(v)=>Math.max(0,Math.min(total-1,v));const readHash=()=>{const n=parseInt(location.hash.slice(1),10);if(Number.isFinite(n)){idx=clamp(n-1);}};const render=()=>{slides.forEach((s,i)=>s.classList.toggle('active',i===idx));counter.textContent=(idx+1)+' / '+total;prev.disabled=idx===0;next.disabled=idx===total-1;if(location.hash!=='#'+(idx+1)){history.replaceState(null,'','#'+(idx+1));}};prev.addEventListener('click',()=>{idx=clamp(idx-1);render();});next.addEventListener('click',()=>{idx=clamp(idx+1);render();});window.addEventListener('keydown',(e)=>{if(e.key==='ArrowLeft'){e.preventDefault();idx=clamp(idx-1);render();}if(e.key==='ArrowRight'){e.preventDefault();idx=clamp(idx+1);render();}});window.addEventListener('hashchange',()=>{readHash();render();});readHash();render();})();</script>",
+    ";const clamp=(v)=>Math.max(0,Math.min(total-1,v));const clampScale=(v)=>Math.max(minScale,Math.min(maxScale,v));const readHash=()=>{const n=parseInt(location.hash.slice(1),10);if(Number.isFinite(n)){idx=clamp(n-1);}};const applyTextScale=()=>{slides.forEach((slide)=>{const svg=slide.querySelector('svg');if(!svg){return;}svg.querySelectorAll('text').forEach((node)=>{const baseValue=node.dataset.baseFontSize||node.getAttribute('font-size');const base=Number.parseFloat(baseValue||'');if(!Number.isFinite(base)||base<=0){return;}if(!node.dataset.baseFontSize){node.dataset.baseFontSize=String(base);}const scaled=Math.max(1,Math.round(base*textScale/100));node.setAttribute('font-size',String(scaled));});});};const renderScale=()=>{if(scaleLabel){scaleLabel.textContent=textScale+'%';}if(dec){dec.disabled=textScale<=minScale;}if(inc){inc.disabled=textScale>=maxScale;}};const setScale=(next)=>{const value=clampScale(next);if(value===textScale){renderScale();return;}textScale=value;applyTextScale();renderScale();};const render=()=>{slides.forEach((s,i)=>s.classList.toggle('active',i===idx));counter.textContent=(idx+1)+' / '+total;prev.disabled=idx===0;next.disabled=idx===total-1;if(location.hash!=='#'+(idx+1)){history.replaceState(null,'','#'+(idx+1));}};prev.addEventListener('click',()=>{idx=clamp(idx-1);render();});next.addEventListener('click',()=>{idx=clamp(idx+1);render();});dec.addEventListener('click',()=>{setScale(textScale-stepScale);});inc.addEventListener('click',()=>{setScale(textScale+stepScale);});reset.addEventListener('click',()=>{setScale(100);});window.addEventListener('keydown',(e)=>{if(e.key==='ArrowLeft'){e.preventDefault();idx=clamp(idx-1);render();}if(e.key==='ArrowRight'){e.preventDefault();idx=clamp(idx+1);render();}});window.addEventListener('hashchange',()=>{readHash();render();});readHash();applyTextScale();renderScale();render();})();</script>",
   )
   sb.write_string("</body></html>")
   Ok(sb.to_string())

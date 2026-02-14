@@ -56,6 +56,45 @@ test "render svg slides" {
 }
 
 ///|
+test "render svg slides scales up when content is short" {
+  let result = render_svg_slides("## Intro\n- hello\n")
+  match result {
+    Ok(svgs) => {
+      inspect(svgs.length(), content="1")
+      inspect(
+        svgs[0].contains("font-size=\"46\" fill=\"#cbd5e1\""[:]),
+        content="true",
+      )
+    }
+    Err(msg) => fail("unexpected render error: " + msg)
+  }
+}
+
+///|
+test "render svg slides truncates when content is dense" {
+  let sb = StringBuilder::new()
+  sb.write_string("## Dense\n")
+  for i = 0; i < 40; i = i + 1 {
+    sb.write_string("- item ")
+    sb.write_string(i.to_string())
+    sb.write_string(
+      " with many words to overflow the slide body area quickly\n",
+    )
+  }
+  let result = render_svg_slides(sb.to_string())
+  match result {
+    Ok(svgs) => {
+      inspect(
+        svgs[0].contains("font-size=\"24\" fill=\"#cbd5e1\""[:]),
+        content="true",
+      )
+      inspect(svgs[0].contains("…"[:]), content="true")
+    }
+    Err(msg) => fail("unexpected render error: " + msg)
+  }
+}
+
+///|
 test "render slide deck page" {
   let markdown =
     #|---
@@ -75,6 +114,8 @@ test "render slide deck page" {
       inspect(html.contains("<html"[:]), content="true")
       inspect(html.contains("let idx=1;"[:]), content="true")
       inspect(html.contains("Slide B"[:]), content="true")
+      inspect(html.contains("id=\"text-inc\""[:]), content="true")
+      inspect(html.contains("id=\"font-scale\""[:]), content="true")
     }
     Err(msg) => fail("unexpected deck error: " + msg)
   }
