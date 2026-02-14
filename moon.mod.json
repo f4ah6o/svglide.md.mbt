@@ -1,0 +1,12 @@
+{
+  "name": "f4ah6o/svglide.md.mbt",
+  "version": "0.1.0",
+  "deps": {},
+  "source": "src",
+  "preferred-target": "js",
+  "readme": "README.mbt.md",
+  "repository": "",
+  "license": "Apache-2.0",
+  "keywords": [],
+  "description": ""
+}

@@ -1,0 +1,7 @@
+import {
+  "f4ah6o/svglide.md.mbt" @lib,
+}
+
+options(
+  "is-main": true,
+)

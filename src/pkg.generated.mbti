@@ -1,0 +1,44 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "f4ah6o/svglide.md.mbt"
+
+// Values
+pub fn available_themes() -> Array[String]
+
+pub fn parse_front_matter(String) -> Result[FrontMatter, String]
+
+pub fn parse_slides(String) -> Array[SlideContent]
+
+pub fn render_slide_deck_page(DeckRenderInput) -> Result[String, String]
+
+pub fn render_svg_slides(String, theme_id? : String) -> Result[Array[String], String]
+
+// Errors
+
+// Types and methods
+pub struct DeckRenderInput {
+  title : String
+  markdown : String
+  initial_index : Int
+}
+pub fn DeckRenderInput::new(String, String, Int) -> Self
+pub impl Eq for DeckRenderInput
+pub impl Show for DeckRenderInput
+
+pub struct FrontMatter {
+  slide_theme : String
+  body : String
+}
+pub impl Eq for FrontMatter
+pub impl Show for FrontMatter
+
+pub struct SlideContent {
+  title : String
+  lines : Array[String]
+}
+pub impl Eq for SlideContent
+pub impl Show for SlideContent
+
+// Type aliases
+
+// Traits
+
